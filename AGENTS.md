@@ -8,6 +8,9 @@ This repository implements a Python MCP server for a LeafWiki instance. It expos
 LeafWiki page discovery, organization, revision, favorite, and mutation operations as
 MCP tools over stdio. The package uses a `src` layout and requires Python 3.12 or newer.
 
+The canonical repository is `https://github.com/ipapadop/leafwiki-mcp`, the default
+branch is `main`, and the conventional remote name is `origin`.
+
 Keep changes focused on this integration. Consult `README.md` for user-facing setup and
 the current tool inventory; update it when configuration, commands, or exposed tools
 change.
@@ -21,6 +24,10 @@ uv sync
 uv run leafwiki-mcp
 ```
 
+These commands set up and run a source checkout. Do not describe the project as
+installable from PyPI unless a published distribution and its installation workflow
+have been verified.
+
 Canonical quality checks are:
 
 ```bash
@@ -29,6 +36,10 @@ uv run ruff format --check .
 uv run pyright
 uv run pytest
 ```
+
+The repository does not currently define GitHub Actions workflows. Until CI is added,
+the local commands above are the canonical quality gate and must not be represented as
+automatically enforced by GitHub.
 
 During development, run the narrowest relevant test first, for example:
 
@@ -112,6 +123,8 @@ put MCP registration concerns into the HTTP client.
   changing existing tool names or schemas; MCP clients may depend on them.
 - Register every intended public operation explicitly in `create_server()`. Add or
   remove registration tests or assertions when tool exposure changes.
+- Keep the tool inventory in `README.md` synchronized with the explicit registrations
+  in `create_server()`. Compare the two whenever a tool is added, removed, or renamed.
 - Keep the runtime synchronous unless a deliberate repository-wide design change is
   approved. The current client and FastMCP tool methods are synchronous.
 - Preserve stdio transport. Never write ordinary diagnostics, progress messages, or
@@ -171,11 +184,44 @@ put MCP registration concerns into the HTTP client.
   debug logs. Be especially careful when asserting login requests in tests.
 - Generated and local artifacts such as `.venv/`, coverage files, caches, `dist/`,
   `htmlcov/`, egg metadata, and bytecode are ignored; do not deliberately add them.
+- The project is licensed under MIT. Preserve `LICENSE` and the existing
+  `SPDX-License-Identifier: MIT` headers. Add the appropriate comment-form SPDX header
+  to new source, configuration, test, and substantial documentation files.
 - Preserve unrelated user changes. Avoid broad formatting rewrites, dependency
   upgrades, lockfile churn, or generated artifact changes unless they are required by
   the task.
 - Keep `README.md` user-facing. Put durable coding-agent instructions here, and avoid
   maintaining competing copies of the same command or tool inventory.
+
+## Git and GitHub workflow
+
+- Inspect `git status`, the current branch, and relevant diffs before editing. Preserve
+  unrelated staged, unstaged, and untracked user work.
+- Keep commits focused on the requested change. Do not rewrite existing history,
+  force-push, or use destructive Git commands unless explicitly requested.
+- Do not push branches, tags, commits, or open pull requests unless the user explicitly
+  asks for that external action. Preparing or committing work locally is not permission
+  to publish it.
+- Use `main` as the default base branch unless repository state or the user identifies
+  another base. Use the configured `origin` remote for this repository; do not replace
+  or add remotes without checking the existing configuration and request scope.
+
+## Packaging and releases
+
+- The version is defined in `pyproject.toml`. Change it only as part of an intentional
+  release or an explicitly requested version update, and keep user-facing version or
+  status text synchronized.
+- When packaging configuration, release metadata, package contents, or distribution
+  behavior changes, run `uv build`. Inspect both the wheel and source distribution to
+  confirm that required source, README, license, and metadata are present and that
+  local or generated artifacts are absent.
+- Do not claim a PyPI release, GitHub release, tag, or automated release workflow exists
+  without verifying it. Publishing packages, creating releases, and pushing tags are
+  external actions that require explicit user authorization.
+- README installation instructions must distinguish source-checkout setup from a
+  published-package installation. Keep prerequisites, repository clone commands,
+  configuration and credential safety, operational limitations, troubleshooting,
+  development checks, project links, and licensing accurate.
 
 ## Definition of done
 
@@ -187,8 +233,10 @@ Before handing off a change:
 3. Run the relevant focused tests, followed by Ruff lint, Ruff format, Pyright, and the
    complete Pytest suite for code changes.
 4. Update `README.md` when setup, configuration, exposed tools, or user-visible
-   behavior changes.
+   behavior changes. Compare its tool inventory directly with the registrations in
+   `create_server()`.
 5. Review the final diff for accidental secrets, generated files, unrelated edits,
    unsafe destructive defaults, and protocol output on stdout.
-6. Report the commands run and their actual results; do not claim checks passed unless
+6. For packaging or release metadata changes, build and inspect both distributions.
+7. Report the commands run and their actual results; do not claim checks passed unless
    they were executed successfully.
