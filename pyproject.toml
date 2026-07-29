@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: MIT
+
+[project]
+name = "leafwiki-mcp"
+version = "0.1.0"
+description = "An MCP server for creating, editing, and deleting LeafWiki pages."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Yiannis Papadopoulos" }]
+dependencies = [
+    "httpx>=0.28.1,<1",
+    "mcp>=1.26.0,<2",
+]
+
+[project.scripts]
+leafwiki-mcp = "leafwiki_mcp.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.400,<2",
+    "pytest>=9.0.2,<10",
+    "pytest-cov>=7.0.0,<8",
+    "ruff>=0.14.14,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["ALL",]
+ignore = [
+    "A002",     # MCP tool schemas intentionally expose an id parameter
+    "ANN002",   # no type annotation for *args
+    "ANN003",   # no type annotation for **kwargs
+    "ANN401",   # dynamic typing
+    "ARG002",   # unused arguments
+    "BLE001",   # catch blind exception
+    "C901",     # too complex
+    "COM812",   # interferes with formatter
+    "D100",     # missing docstring in public module
+    "D104",     # missing docstring in public package
+    "EM101",    # direct exception messages are clearer at this API boundary
+    "EM102",    # dynamic exception messages are clearer at this API boundary
+    "FBT001",   # MCP tool schemas expose boolean parameters positionally
+    "FBT002",   # MCP tool schemas expose boolean defaults positionally
+    "INP001",   # implicit namespace package
+    "PLR0913",  # MCP and API methods mirror externally defined payload schemas
+    "PLR0912",  # too many branches
+    "PLR2004",  # magic numbers
+    "LOG015",   # logging on root logger
+    "S101",     # assert used
+    "S106",     # tests use an obviously fake password
+    "S311",     # weak random number generator
+    "SLF001",   # private member accessed
+    "T201",     # using print
+    "TRY003",   # API-boundary errors need actionable messages
+    "TRY401",   # allow exception message
+]
+extend-select = ["I"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+ignore-var-parameters = true  # ignore missing documentation for *args and **kwargs parameters
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = 20
+quote-style = "double"
+indent-style = "space"
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=leafwiki_mcp --cov-report=term-missing"
+testpaths = ["tests"]
