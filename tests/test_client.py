@@ -13,7 +13,14 @@ from leafwiki_mcp.client import LeafWikiClient, LeafWikiError, Page
 
 
 def page_data(**overrides: Any) -> dict[str, Any]:
-    """Build a representative LeafWiki page response."""
+    """Build a representative LeafWiki page response.
+
+    Args:
+        **overrides: Page fields that replace the representative defaults.
+
+    Returns:
+        JSON-compatible page response data.
+    """
     value: dict[str, Any] = {
         "id": "page-1",
         "title": "Page",
@@ -32,7 +39,15 @@ def page_data(**overrides: Any) -> dict[str, Any]:
 def make_client(
     handler: Callable[[httpx.Request], httpx.Response], **kwargs: str
 ) -> LeafWikiClient:
-    """Create a client using an in-memory HTTP transport."""
+    """Create a client using an in-memory HTTP transport.
+
+    Args:
+        handler: Function that returns responses for captured HTTP requests.
+        **kwargs: String arguments forwarded to ``LeafWikiClient``.
+
+    Returns:
+        LeafWiki client configured with an HTTPX mock transport.
+    """
     return LeafWikiClient(
         "https://wiki.example.test", transport=httpx.MockTransport(handler), **kwargs
     )

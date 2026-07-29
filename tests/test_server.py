@@ -10,7 +10,14 @@ from leafwiki_mcp.server import LeafWikiTools
 
 
 def make_page(**overrides: Any) -> Page:
-    """Build a page for tool tests."""
+    """Build a page for tool tests.
+
+    Args:
+        **overrides: Page fields that replace the representative defaults.
+
+    Returns:
+        Page model populated with test values.
+    """
     values: dict[str, Any] = {
         "id": "page-1",
         "title": "Old title",

@@ -11,7 +11,11 @@ from leafwiki_mcp.server import create_server
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the command-line parser."""
+    """Build the command-line parser.
+
+    Returns:
+        Parser containing the supported LeafWiki connection options.
+    """
     parser = argparse.ArgumentParser(description="Expose LeafWiki page mutations over MCP stdio.")
     parser.add_argument(
         "--url",
@@ -28,7 +32,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Authenticate with LeafWiki and serve MCP requests over stdio."""
+    """Authenticate with LeafWiki and serve MCP requests over stdio.
+
+    Args:
+        argv: Optional command-line arguments. Uses the process arguments when omitted.
+    """
     arguments = build_parser().parse_args(argv)
     with LeafWikiClient(arguments.url, arguments.username, arguments.password) as client:
         client.authenticate()

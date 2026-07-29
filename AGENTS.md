@@ -85,6 +85,12 @@ put MCP registration concerns into the HTTP client.
 - Public MCP methods need concise, behavior-oriented docstrings. FastMCP exposes these
   descriptions to clients, so document defaults, selector behavior, important
   prerequisites, and destructive effects accurately.
+- Every production class, function, method, and private helper must have a Google-style
+  docstring. Document every class attribute in an `Attributes:` section and every
+  explicit parameter in an `Args:` section; omit only the conventional `self` and
+  `cls` parameters. Document return values and raised exceptions where applicable.
+  Apply the same argument and return documentation to reusable test helpers, but do
+  not require expanded docstrings for `test_*` functions or nested test callbacks.
 - MCP inputs and outputs must remain JSON/MCP-serializable. Convert `Page` objects with
   `to_dict()` and avoid leaking HTTPX objects, exceptions, dataclasses, or other
   process-local values through tool results.
