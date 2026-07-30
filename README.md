@@ -133,8 +133,9 @@ uv run pyright
 uv run pytest
 ```
 
-This repository does not currently define GitHub Actions workflows, so these local commands are
-the canonical quality gate.
+The `Quality` GitHub Actions workflow runs Ruff lint, Ruff formatting verification, Pyright, and
+Pytest for every pull request, every push to `main`, and manual dispatches. Run the same commands
+locally before pushing.
 
 ## Project links
 
