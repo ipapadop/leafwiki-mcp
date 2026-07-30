@@ -72,7 +72,7 @@ The server accepts command-line options or equivalent environment variables:
 | `--url` | `LEAFWIKI_URL` | `http://localhost:8080` |
 | `--username` | `LEAFWIKI_USERNAME` | empty |
 | `--password` | `LEAFWIKI_PASSWORD` | empty |
-| `--read-only` | `LEAFWIKI_READ_ONLY` | `false` |
+| `--read-only` / `--no-read-only` | `LEAFWIKI_READ_ONLY` | `false` |
 
 Credentials are unnecessary when authentication is disabled. Accounts requiring
 TOTP are not supported; use a dedicated editor account without TOTP.
@@ -83,8 +83,10 @@ LeafWiki instance, omit `LEAFWIKI_USERNAME` and `LEAFWIKI_PASSWORD` entirely.
 
 Set `LEAFWIKI_READ_ONLY=true` or pass `--read-only` to register only discovery and retrieval
 tools. The environment variable accepts `true`/`false`, `1`/`0`, `yes`/`no`, and `on`/`off`
-case-insensitively. Read-only mode provides defense in depth against accidental changes; it does
-not replace LeafWiki's server-side authorization or appropriately scoped credentials.
+case-insensitively. Either command-line option overrides the environment value, so
+`--no-read-only` explicitly enables read-write mode. Read-only mode provides defense in depth
+against accidental changes; it does not replace LeafWiki's server-side authorization or
+appropriately scoped credentials.
 
 ## Running
 

@@ -54,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
         parser.error(f"LEAFWIKI_READ_ONLY: {error}")
     parser.add_argument(
         "--read-only",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=read_only_default,
         help="register only tools that do not mutate LeafWiki state",
     )

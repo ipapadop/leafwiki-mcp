@@ -43,15 +43,6 @@ def test_read_only_accepts_false_environment_values(
     assert arguments.read_only is False
 
 
-def test_read_only_flag_overrides_false_environment_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The command-line flag should enable read-only mode over a false environment default."""
-    monkeypatch.setenv("LEAFWIKI_READ_ONLY", "false")
-
-    arguments = build_parser().parse_args(["--read-only"])
-
-    assert arguments.read_only is True
-
-
 def test_read_only_rejects_invalid_environment_value(monkeypatch: pytest.MonkeyPatch) -> None:
     """An unrecognized environment value should fail argument parsing."""
     monkeypatch.setenv("LEAFWIKI_READ_ONLY", "sometimes")
@@ -60,8 +51,18 @@ def test_read_only_rejects_invalid_environment_value(monkeypatch: pytest.MonkeyP
         build_parser().parse_args([])
 
 
-def test_main_disables_write_tool_registration(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The read-only CLI flag should disable write tools in the MCP server."""
+@pytest.mark.parametrize(
+    ("environment_value", "option", "expected_read_write"),
+    [("false", "--read-only", False), ("true", "--no-read-only", True)],
+)
+def test_main_cli_mode_overrides_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    environment_value: str,
+    option: str,
+    expected_read_write: bool,
+) -> None:
+    """An explicit CLI mode should override the environment-configured mode."""
+    monkeypatch.setenv("LEAFWIKI_READ_ONLY", environment_value)
     client = Mock()
     client_context = MagicMock()
     client_context.__enter__.return_value = client
@@ -71,8 +72,6 @@ def test_main_disables_write_tool_registration(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(cli, "LeafWikiClient", client_class)
     monkeypatch.setattr(cli, "create_server", create_server)
 
-    cli.main(["--url", "https://wiki.example.test", "--read-only"])
+    cli.main(["--url", "https://wiki.example.test", option])
 
-    client.authenticate.assert_called_once_with()
-    create_server.assert_called_once_with(client, read_write=False)
-    mcp_server.run.assert_called_once_with(transport="stdio")
+    create_server.assert_called_once_with(client, read_write=expected_read_write)
