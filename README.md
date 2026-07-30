@@ -72,6 +72,7 @@ The server accepts command-line options or equivalent environment variables:
 | `--url` | `LEAFWIKI_URL` | `http://localhost:8080` |
 | `--username` | `LEAFWIKI_USERNAME` | empty |
 | `--password` | `LEAFWIKI_PASSWORD` | empty |
+| `--read-only` / `--no-read-only` | `LEAFWIKI_READ_ONLY` | `false` |
 
 Credentials are unnecessary when authentication is disabled. Accounts requiring
 TOTP are not supported; use a dedicated editor account without TOTP.
@@ -79,6 +80,13 @@ TOTP are not supported; use a dedicated editor account without TOTP.
 The password in the MCP client example below is stored directly in that client's configuration.
 Protect the configuration as you would any other credential. For an authentication-disabled
 LeafWiki instance, omit `LEAFWIKI_USERNAME` and `LEAFWIKI_PASSWORD` entirely.
+
+Set `LEAFWIKI_READ_ONLY=true` or pass `--read-only` to register only discovery and retrieval
+tools. The environment variable accepts `true`/`false`, `1`/`0`, `yes`/`no`, and `on`/`off`
+case-insensitively. Either command-line option overrides the environment value, so
+`--no-read-only` explicitly enables read-write mode. Read-only mode provides defense in depth
+against accidental changes; it does not replace LeafWiki's server-side authorization or
+appropriately scoped credentials.
 
 ## Running
 
@@ -161,7 +169,7 @@ Replace `/absolute/path/to/leafwiki-mcp` with the location of your clone:
 }
 ```
 
-The server exposes these tools over stdio:
+The server always exposes these discovery and retrieval tools over stdio:
 
 - `search_pages`: search page text and tags with pagination
 - `get_page`: retrieve Markdown content and metadata by ID or path
@@ -174,8 +182,12 @@ The server exposes these tools over stdio:
 - `compare_page_revisions`: compare two historical snapshots
 - `get_indexing_status`: inspect full-text indexing state
 - `list_property_keys`, `find_page_by_title`, `lookup_path`, and `suggest_slug`: discover page metadata and paths
+- `list_favorites`: list personal bookmarks
+
+In the default read-write mode, the server also exposes these mutation tools:
+
 - `move_page`, `copy_page`, `ensure_path`, `convert_page`, and `pin_page`: organize pages
-- `add_favorite`, `remove_favorite`, and `list_favorites`: manage personal bookmarks
+- `add_favorite` and `remove_favorite`: change personal bookmarks
 - `append_to_page`, `update_page_tags`, and `update_page_properties`: make focused page updates
 - `sort_pages`: set the ordering of children under a page
 - `add_page`, `edit_page`, and `delete_page`: mutate pages using optimistic concurrency

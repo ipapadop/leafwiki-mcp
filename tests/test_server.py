@@ -2,11 +2,46 @@
 
 """Tests for LeafWiki MCP operations."""
 
+import asyncio
 from typing import Any
 from unittest.mock import Mock
 
 from leafwiki_mcp.client import LeafWikiClient, Page
-from leafwiki_mcp.server import LeafWikiTools
+from leafwiki_mcp.server import LeafWikiTools, create_server
+
+READ_ONLY_TOOLS = {
+    "browse_tree",
+    "compare_page_revisions",
+    "find_page_by_title",
+    "find_pages_by_property",
+    "get_indexing_status",
+    "get_page",
+    "get_page_links",
+    "get_page_revision",
+    "list_favorites",
+    "list_page_revisions",
+    "list_property_keys",
+    "list_tags",
+    "lookup_path",
+    "search_pages",
+    "suggest_slug",
+}
+MUTATION_TOOLS = {
+    "add_favorite",
+    "add_page",
+    "append_to_page",
+    "convert_page",
+    "copy_page",
+    "delete_page",
+    "edit_page",
+    "ensure_path",
+    "move_page",
+    "pin_page",
+    "remove_favorite",
+    "sort_pages",
+    "update_page_properties",
+    "update_page_tags",
+}
 
 
 def make_page(**overrides: Any) -> Page:
@@ -110,3 +145,21 @@ def test_read_tools_forward_arguments_to_client() -> None:
         page_id="", path="page", cursor="next", limit=10
     )
     client.get_page_revision.assert_called_once_with(revision_id="rev-1", page_id="", path="page")
+
+
+def test_create_server_registers_exact_read_write_tool_set_by_default() -> None:
+    """The backward-compatible default should expose read and mutation tools."""
+    server = create_server(Mock(spec=LeafWikiClient))
+
+    registered = {tool.name for tool in asyncio.run(server.list_tools())}
+
+    assert registered == READ_ONLY_TOOLS | MUTATION_TOOLS
+
+
+def test_create_server_registers_exact_read_only_tool_set() -> None:
+    """Disabling writes should prevent every mutation tool from being exposed."""
+    server = create_server(Mock(spec=LeafWikiClient), read_write=False)
+
+    registered = {tool.name for tool in asyncio.run(server.list_tools())}
+
+    assert registered == READ_ONLY_TOOLS
