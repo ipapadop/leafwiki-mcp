@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: MIT
+
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Ruff, Pyright, and Pytest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+          version: "0.11.16"
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --dev
+
+      - name: Run Ruff lint
+        run: uv run --frozen ruff check .
+
+      - name: Check Ruff formatting
+        run: uv run --frozen ruff format --check .
+
+      - name: Run Pyright
+        run: uv run --frozen pyright
+
+      - name: Run Pytest
+        run: uv run --frozen pytest

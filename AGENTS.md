@@ -37,9 +37,9 @@ uv run pyright
 uv run pytest
 ```
 
-The repository does not currently define GitHub Actions workflows. Until CI is added,
-the local commands above are the canonical quality gate and must not be represented as
-automatically enforced by GitHub.
+The `Quality` GitHub Actions workflow runs Ruff lint, Ruff formatting verification,
+Pyright, and Pytest for pull requests, pushes to `main`, and manual dispatches. These
+are the same canonical quality checks required locally before completion.
 
 During development, run the narrowest relevant test first, for example:
 
