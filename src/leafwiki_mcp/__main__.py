@@ -10,6 +10,26 @@ from leafwiki_mcp.client import LeafWikiClient
 from leafwiki_mcp.server import create_server
 
 
+def _parse_boolean(value: str) -> bool:
+    """Parse a boolean configuration value.
+
+    Args:
+        value: Case-insensitive boolean spelling.
+
+    Returns:
+        Parsed boolean value.
+
+    Raises:
+        ValueError: If the value is not a supported boolean spelling.
+    """
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"invalid boolean value: {value!r}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser.
 
@@ -28,6 +48,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--password", default=os.getenv("LEAFWIKI_PASSWORD", ""), help="LeafWiki password"
     )
+    try:
+        read_only_default = _parse_boolean(os.getenv("LEAFWIKI_READ_ONLY", "false"))
+    except ValueError as error:
+        parser.error(f"LEAFWIKI_READ_ONLY: {error}")
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        default=read_only_default,
+        help="register only tools that do not mutate LeafWiki state",
+    )
     return parser
 
 
@@ -40,7 +70,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     arguments = build_parser().parse_args(argv)
     with LeafWikiClient(arguments.url, arguments.username, arguments.password) as client:
         client.authenticate()
-        create_server(client).run(transport="stdio")
+        create_server(client, read_write=not arguments.read_only).run(transport="stdio")
 
 
 if __name__ == "__main__":

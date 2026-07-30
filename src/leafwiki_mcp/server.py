@@ -479,14 +479,15 @@ class LeafWikiTools:
         return self._client.delete_page(current, recursive=recursive)
 
 
-def create_server(client: LeafWikiClient) -> FastMCP:
+def create_server(client: LeafWikiClient, *, read_write: bool = True) -> FastMCP:
     """Create an MCP server backed by an authenticated LeafWiki client.
 
     Args:
         client: Authenticated client used by the registered tools.
+        read_write: Whether to register tools that mutate LeafWiki state.
 
     Returns:
-        FastMCP server with every public LeafWiki tool registered.
+        FastMCP server with the selected public LeafWiki tools registered.
     """
     server = FastMCP("leafwiki")
     tools = LeafWikiTools(client)
@@ -504,19 +505,20 @@ def create_server(client: LeafWikiClient) -> FastMCP:
     server.tool()(tools.find_page_by_title)
     server.tool()(tools.lookup_path)
     server.tool()(tools.suggest_slug)
-    server.tool()(tools.move_page)
-    server.tool()(tools.copy_page)
-    server.tool()(tools.ensure_path)
-    server.tool()(tools.convert_page)
-    server.tool()(tools.add_favorite)
-    server.tool()(tools.remove_favorite)
     server.tool()(tools.list_favorites)
-    server.tool()(tools.pin_page)
-    server.tool()(tools.append_to_page)
-    server.tool()(tools.update_page_tags)
-    server.tool()(tools.update_page_properties)
-    server.tool()(tools.sort_pages)
-    server.tool()(tools.add_page)
-    server.tool()(tools.edit_page)
-    server.tool()(tools.delete_page)
+    if read_write:
+        server.tool()(tools.move_page)
+        server.tool()(tools.copy_page)
+        server.tool()(tools.ensure_path)
+        server.tool()(tools.convert_page)
+        server.tool()(tools.add_favorite)
+        server.tool()(tools.remove_favorite)
+        server.tool()(tools.pin_page)
+        server.tool()(tools.append_to_page)
+        server.tool()(tools.update_page_tags)
+        server.tool()(tools.update_page_properties)
+        server.tool()(tools.sort_pages)
+        server.tool()(tools.add_page)
+        server.tool()(tools.edit_page)
+        server.tool()(tools.delete_page)
     return server
