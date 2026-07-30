@@ -9,7 +9,7 @@ edit, and delete content in a [LeafWiki](https://github.com/perstarkse/leafwiki)
 
 The project is at version 0.1.0 and is under early development. It runs as a synchronous MCP
 server over stdio. Installation from PyPI is not currently documented or supported; run it from
-a source checkout.
+GitHub directly or from a source checkout.
 
 ## Prerequisites
 
@@ -18,7 +18,36 @@ a source checkout.
 
 ## Installation
 
-Clone the repository over HTTPS:
+Choose the method that matches how you plan to use the server. All methods run the same
+`leafwiki-mcp` command over stdio.
+
+### Run directly from GitHub (recommended)
+
+Use `uvx` to run the server directly from the GitHub repository without cloning it or installing
+it permanently:
+
+```bash
+uvx --from git+https://github.com/ipapadop/leafwiki-mcp.git leafwiki-mcp
+```
+
+`uvx` creates an isolated environment and caches downloaded dependencies for later runs.
+
+### Install as a persistent tool
+
+Install the server from GitHub when you want the `leafwiki-mcp` command to remain available on
+your `PATH`:
+
+```bash
+uv tool install git+https://github.com/ipapadop/leafwiki-mcp.git
+leafwiki-mcp
+```
+
+If `uv` reports that its tool directory is not on `PATH`, run `uv tool update-shell` and restart
+your shell.
+
+### Run from a source checkout
+
+Clone over HTTPS:
 
 ```bash
 git clone https://github.com/ipapadop/leafwiki-mcp.git
@@ -26,7 +55,7 @@ cd leafwiki-mcp
 uv sync
 ```
 
-Or clone it over SSH:
+Or clone over SSH:
 
 ```bash
 git clone git@github.com:ipapadop/leafwiki-mcp.git
@@ -53,11 +82,63 @@ LeafWiki instance, omit `LEAFWIKI_USERNAME` and `LEAFWIKI_PASSWORD` entirely.
 
 ## Running
 
+If you installed `leafwiki-mcp` as a persistent tool, start it with:
+
+```bash
+leafwiki-mcp
+```
+
+From a source checkout, start it with:
+
 ```bash
 uv run leafwiki-mcp
 ```
 
-Example MCP client configuration:
+In normal use, an MCP client starts the server for you. Use the configuration that matches your
+installation method.
+
+### Directly from GitHub (recommended)
+
+```json
+{
+  "mcpServers": {
+    "leafwiki": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/ipapadop/leafwiki-mcp.git",
+        "leafwiki-mcp"
+      ],
+      "env": {
+        "LEAFWIKI_URL": "https://wiki.example.com",
+        "LEAFWIKI_USERNAME": "mcp-editor",
+        "LEAFWIKI_PASSWORD": "replace-me"
+      }
+    }
+  }
+}
+```
+
+### Persistent tool installation
+
+```json
+{
+  "mcpServers": {
+    "leafwiki": {
+      "command": "leafwiki-mcp",
+      "env": {
+        "LEAFWIKI_URL": "https://wiki.example.com",
+        "LEAFWIKI_USERNAME": "mcp-editor",
+        "LEAFWIKI_PASSWORD": "replace-me"
+      }
+    }
+  }
+}
+```
+
+### Source checkout
+
+Replace `/absolute/path/to/leafwiki-mcp` with the location of your clone:
 
 ```json
 {
