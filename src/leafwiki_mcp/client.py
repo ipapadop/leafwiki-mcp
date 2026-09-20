@@ -18,6 +18,13 @@ class LeafWikiError(RuntimeError):
     """An error returned while communicating with LeafWiki."""
 
 
+class LeafWikiConnectionError(LeafWikiError):
+    """LeafWiki could not be reached over the network."""
+
+
+_SAFE_METHODS = frozenset({"GET", "HEAD"})
+
+
 @dataclass(frozen=True, slots=True)
 class Page:
     """A LeafWiki page returned by the API.
@@ -104,6 +111,8 @@ class LeafWikiClient:
         _password: Password used when authentication is enabled.
         _csrf_token: Most recently received CSRF token.
         _client: Cookie-preserving HTTPX session.
+        _auth_disabled: Whether the instance reported that authentication is disabled.
+        _authenticating: Whether an authentication exchange is currently in progress.
     """
 
     def __init__(
@@ -135,6 +144,8 @@ class LeafWikiClient:
         self._username = username
         self._password = password
         self._csrf_token = ""
+        self._auth_disabled = False
+        self._authenticating = False
         self._client = httpx.Client(
             base_url=normalized_url,
             follow_redirects=True,
@@ -170,13 +181,21 @@ class LeafWikiClient:
                 account requires TOTP.
         """
         config = self._object_request("GET", "/api/config")
-        if bool(config.get("authDisabled")):
+        self._auth_disabled = bool(config.get("authDisabled"))
+        if self._auth_disabled:
             return
         if not self._username or not self._password:
             raise LeafWikiError(
                 "LeafWiki requires authentication; set LEAFWIKI_USERNAME and LEAFWIKI_PASSWORD"
             )
+        self._login()
 
+    def _login(self) -> None:
+        """Exchange the configured credentials for a LeafWiki session.
+
+        Raises:
+            LeafWikiError: If login fails or the account requires TOTP.
+        """
         result = self._object_request(
             "POST",
             "/api/auth/login",
@@ -879,6 +898,9 @@ class LeafWikiClient:
     def _json_request(self, method: str, path: str, **kwargs: Any) -> JSONValue:
         """Send an HTTP request and decode its JSON response.
 
+        A rejected session triggers one re-authentication and replay, because LeafWiki
+        does not act on a request it refuses.
+
         Args:
             method: HTTP request method.
             path: API path relative to the configured LeafWiki URL.
@@ -890,22 +912,15 @@ class LeafWikiClient:
         Raises:
             LeafWikiError: If transport, status, size, or JSON decoding fails.
         """
-        headers = dict(kwargs.pop("headers", {}))
-        if method not in {"GET", "HEAD"} and self._csrf_token:
-            headers["X-CSRF-Token"] = self._csrf_token
-        try:
-            response = self._client.request(method, path, headers=headers, **kwargs)
-            response.raise_for_status()
-        except httpx.HTTPStatusError as error:
-            message = self._error_message(error.response)
+        response = self._attempt(method, path, **kwargs)
+        if response.status_code == 401 and self._reauthenticate():
+            response = self._attempt(method, path, **kwargs)
+        if not response.is_success:
+            message = self._error_message(response)
             raise LeafWikiError(
-                f"LeafWiki API {method} {path} returned {error.response.status_code}: {message}"
-            ) from error
-        except httpx.HTTPError as error:
-            raise LeafWikiError(f"Connect to LeafWiki: {error}") from error
+                f"LeafWiki API {method} {path} returned {response.status_code}: {message}"
+            )
 
-        if token := response.headers.get("X-CSRF-Token"):
-            self._csrf_token = token
         if len(response.content) > MAX_RESPONSE_BYTES:
             raise LeafWikiError(f"LeafWiki response exceeds {MAX_RESPONSE_BYTES} bytes")
         if not response.content.strip():
@@ -914,6 +929,95 @@ class LeafWikiClient:
             return cast("JSONValue", response.json())
         except ValueError as error:
             raise LeafWikiError("LeafWiki returned invalid JSON") from error
+
+    def _attempt(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Perform one request, retrying once when the attempt failed without effect.
+
+        Args:
+            method: HTTP request method.
+            path: API path relative to the configured LeafWiki URL.
+            **kwargs: Additional keyword arguments forwarded to HTTPX.
+
+        Returns:
+            HTTP response, which may carry an error status.
+
+        Raises:
+            LeafWikiConnectionError: If LeafWiki cannot be reached.
+            LeafWikiError: If the request fails for a reason other than reachability.
+        """
+        for final_attempt in (False, True):
+            try:
+                return self._request(method, path, **kwargs)
+            except httpx.TransportError as error:
+                if final_attempt or not self._is_retriable(error, method):
+                    raise LeafWikiConnectionError(f"Connect to LeafWiki: {error}") from error
+            except httpx.HTTPError as error:
+                raise LeafWikiError(f"LeafWiki API {method} {path} failed: {error}") from error
+        raise AssertionError("unreachable")
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Issue a single HTTP request and record any refreshed CSRF token.
+
+        Args:
+            method: HTTP request method.
+            path: API path relative to the configured LeafWiki URL.
+            **kwargs: Additional keyword arguments forwarded to HTTPX.
+
+        Returns:
+            HTTP response, which may carry an error status.
+        """
+        headers: dict[str, str] = dict(kwargs.pop("headers", {}))
+        if method not in _SAFE_METHODS and self._csrf_token:
+            headers["X-CSRF-Token"] = self._csrf_token
+        response = self._client.request(method, path, headers=headers, **kwargs)
+        if token := response.headers.get("X-CSRF-Token"):
+            self._csrf_token = token
+        return response
+
+    def _reauthenticate(self) -> bool:
+        """Repeat the startup authentication exchange for a rejected session.
+
+        The full exchange runs so that the login request carries a CSRF token from the
+        new session rather than the token bound to the rejected one.
+
+        Returns:
+            Whether a fresh session was established and the request may be replayed.
+
+        Raises:
+            LeafWikiError: If re-authentication fails, so that credential, TOTP, and
+                reachability guidance reaches the caller instead of a bare rejection.
+        """
+        if self._authenticating or self._auth_disabled:
+            return False
+        self._authenticating = True
+        try:
+            self.authenticate()
+        except LeafWikiError as error:
+            raise LeafWikiError(
+                f"LeafWiki rejected the session and re-authentication failed: {error}"
+            ) from error
+        finally:
+            self._authenticating = False
+        return not self._auth_disabled
+
+    @staticmethod
+    def _is_retriable(error: httpx.TransportError, method: str) -> bool:
+        """Report whether a transport failure may be retried without repeating an effect.
+
+        Args:
+            error: Transport failure raised by HTTPX.
+            method: HTTP method of the failed request.
+
+        Returns:
+            Whether the attempt can be repeated safely. Timeouts are excluded because
+            the full timeout budget has already been spent. A failed connection never
+            reached LeafWiki, and a safe method has no effect to repeat.
+        """
+        if isinstance(error, httpx.TimeoutException):
+            return False
+        if isinstance(error, httpx.ConnectError):
+            return True
+        return method in _SAFE_METHODS
 
     @staticmethod
     def _error_message(response: httpx.Response) -> str:

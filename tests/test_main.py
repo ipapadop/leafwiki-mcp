@@ -8,6 +8,25 @@ import pytest
 
 from leafwiki_mcp import __main__ as cli
 from leafwiki_mcp.__main__ import build_parser
+from leafwiki_mcp.client import LeafWikiConnectionError, LeafWikiError
+
+
+def install_fake_server(monkeypatch: pytest.MonkeyPatch, client: Mock) -> Mock:
+    """Replace the client and server factories used by ``main`` with test doubles.
+
+    Args:
+        monkeypatch: Fixture used to patch the command-line module.
+        client: Client double returned by the patched client context manager.
+
+    Returns:
+        Mock server factory whose ``return_value`` is the MCP server ``main`` runs.
+    """
+    client_context = MagicMock()
+    client_context.__enter__.return_value = client
+    monkeypatch.setattr(cli, "LeafWikiClient", Mock(return_value=client_context))
+    create_server = Mock(return_value=Mock())
+    monkeypatch.setattr(cli, "create_server", create_server)
+    return create_server
 
 
 def test_read_only_defaults_to_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -64,14 +83,36 @@ def test_main_cli_mode_overrides_environment(
     """An explicit CLI mode should override the environment-configured mode."""
     monkeypatch.setenv("LEAFWIKI_READ_ONLY", environment_value)
     client = Mock()
-    client_context = MagicMock()
-    client_context.__enter__.return_value = client
-    client_class = Mock(return_value=client_context)
-    mcp_server = Mock()
-    create_server = Mock(return_value=mcp_server)
-    monkeypatch.setattr(cli, "LeafWikiClient", client_class)
-    monkeypatch.setattr(cli, "create_server", create_server)
+    create_server = install_fake_server(monkeypatch, client)
 
     cli.main(["--url", "https://wiki.example.test", option])
 
     create_server.assert_called_once_with(client, read_write=expected_read_write)
+
+
+def test_main_serves_when_leafwiki_is_unreachable_at_startup(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A temporarily unreachable instance should not prevent the server from starting."""
+    client = Mock()
+    client.authenticate.side_effect = LeafWikiConnectionError("Connect to LeafWiki: refused")
+    create_server = install_fake_server(monkeypatch, client)
+
+    cli.main(["--url", "https://wiki.example.test"])
+
+    create_server.return_value.run.assert_called_once_with(transport="stdio")
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Connect to LeafWiki: refused" in captured.err
+
+
+def test_main_stops_when_authentication_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A credential or TOTP failure should stop startup instead of serving broken tools."""
+    client = Mock()
+    client.authenticate.side_effect = LeafWikiError("LeafWiki account requires TOTP")
+    create_server = install_fake_server(monkeypatch, client)
+
+    with pytest.raises(LeafWikiError, match="requires TOTP"):
+        cli.main(["--url", "https://wiki.example.test"])
+
+    create_server.return_value.run.assert_not_called()
