@@ -4,9 +4,10 @@
 
 import argparse
 import os
+import sys
 from collections.abc import Sequence
 
-from leafwiki_mcp.client import LeafWikiClient
+from leafwiki_mcp.client import LeafWikiClient, LeafWikiConnectionError
 from leafwiki_mcp.server import create_server
 
 
@@ -69,7 +70,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     """
     arguments = build_parser().parse_args(argv)
     with LeafWikiClient(arguments.url, arguments.username, arguments.password) as client:
-        client.authenticate()
+        try:
+            client.authenticate()
+        except LeafWikiConnectionError as error:
+            # Serve anyway: an instance that is unreachable at startup is usually
+            # reachable later, and the client authenticates again on demand. Diagnostics
+            # go to stderr because stdout carries the MCP protocol stream.
+            print(f"leafwiki-mcp: {error}; retrying when a tool is called", file=sys.stderr)
         create_server(client, read_write=not arguments.read_only).run(transport="stdio")
 
 

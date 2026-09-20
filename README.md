@@ -205,7 +205,14 @@ follow-up update fails.
 ## Troubleshooting
 
 - **Cannot connect:** confirm `LEAFWIKI_URL` includes `http://` or `https://`, points to a running
-  LeafWiki instance, and is reachable from the MCP client process.
+  LeafWiki instance, and is reachable from the MCP client process. The server starts even when
+  LeafWiki is unreachable on the network, reports the problem on stderr, and connects when a tool
+  is first called, so a host that is briefly down does not require restarting the MCP client. A
+  LeafWiki instance that answers with an error status still stops startup.
+- **Intermittent failures during a long session:** the server logs in again and repeats the
+  request when LeafWiki rejects an expired session. It also retries a request once when a pooled
+  connection is dropped, except for state-changing requests that LeafWiki may already have
+  processed; those are reported so they can be retried deliberately.
 - **Authentication required:** set both `LEAFWIKI_USERNAME` and `LEAFWIKI_PASSWORD`, or omit them
   when LeafWiki reports that authentication is disabled.
 - **TOTP required:** TOTP accounts are unsupported. Use a dedicated editor account without TOTP.

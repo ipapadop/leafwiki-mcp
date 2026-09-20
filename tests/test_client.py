@@ -9,7 +9,12 @@ from typing import Any
 import httpx
 import pytest
 
-from leafwiki_mcp.client import LeafWikiClient, LeafWikiError, Page
+from leafwiki_mcp.client import (
+    LeafWikiClient,
+    LeafWikiConnectionError,
+    LeafWikiError,
+    Page,
+)
 
 
 def page_data(**overrides: Any) -> dict[str, Any]:
@@ -50,6 +55,27 @@ def make_client(
     """
     return LeafWikiClient(
         "https://wiki.example.test", transport=httpx.MockTransport(handler), **kwargs
+    )
+
+
+def replace_content(client: LeafWikiClient, page: Page, content: str) -> Page:
+    """Send a complete versioned update that changes only a page's content.
+
+    Args:
+        client: Client used to perform the update.
+        page: Current page supplying the version and preserved fields.
+        content: Replacement Markdown content.
+
+    Returns:
+        Page returned by LeafWiki for the update.
+    """
+    return client.update_page(
+        page,
+        title=page.title,
+        slug=page.slug,
+        content=content,
+        tags=page.tags,
+        properties=page.properties,
     )
 
 
@@ -334,3 +360,311 @@ def test_api_error_uses_leafwiki_message() -> None:
         pytest.raises(LeafWikiError, match="version conflict"),
     ):
         client.get_page(page_id="page-1")
+
+
+def test_expired_session_reauthenticates_and_replays_read() -> None:
+    """A rejected read should log in again and repeat the original request."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/config":
+            return httpx.Response(200, json={"authDisabled": False})
+        if request.url.path == "/api/auth/login":
+            return httpx.Response(200, json={"requiresTotp": False})
+        if sum(item.url.path == "/api/pages/page-1" for item in requests) == 1:
+            return httpx.Response(401, json={"message": "session expired"})
+        return httpx.Response(200, json=page_data())
+
+    with make_client(handler, username="editor", password="secret") as client:
+        page = client.get_page(page_id="page-1")
+
+    assert page.id == "page-1"
+    assert [request.url.path for request in requests] == [
+        "/api/pages/page-1",
+        "/api/config",
+        "/api/auth/login",
+        "/api/pages/page-1",
+    ]
+
+
+def test_reauthenticated_mutation_replays_with_refreshed_csrf_token() -> None:
+    """A replayed mutation should carry the CSRF token issued by the new session."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/config":
+            return httpx.Response(200, json={"authDisabled": False})
+        if request.url.path == "/api/auth/login":
+            return httpx.Response(
+                200, json={"requiresTotp": False}, headers={"X-CSRF-Token": "fresh"}
+            )
+        if request.method == "GET":
+            return httpx.Response(200, json=page_data())
+        if sum(item.method == "PUT" for item in requests) == 1:
+            return httpx.Response(401, json={"message": "session expired"})
+        return httpx.Response(200, json=page_data(version="v2", content="New"))
+
+    with make_client(handler, username="editor", password="secret") as client:
+        page = client.get_page(page_id="page-1")
+        updated = replace_content(client, page, "New")
+
+    updates = [request for request in requests if request.method == "PUT"]
+    assert len(updates) == 2
+    assert "X-CSRF-Token" not in updates[0].headers
+    assert updates[1].headers["X-CSRF-Token"] == "fresh"
+    assert json.loads(updates[1].read()) == json.loads(updates[0].read())
+    assert updated.version == "v2"
+
+
+def test_rejected_request_without_credentials_reports_missing_credentials() -> None:
+    """A rejection with no credentials configured should name the missing settings."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/config":
+            return httpx.Response(200, json={"authDisabled": False})
+        return httpx.Response(401, json={"message": "unauthorized"})
+
+    with make_client(handler) as client, pytest.raises(LeafWikiError) as error:
+        client.get_page(page_id="page-1")
+
+    assert "re-authentication failed" in str(error.value)
+    assert "LEAFWIKI_USERNAME" in str(error.value)
+
+
+def test_failed_reauthentication_reports_why_the_login_failed() -> None:
+    """Recovery that cannot log in should explain the login failure, not the rejection."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/config":
+            return httpx.Response(200, json={"authDisabled": False})
+        if request.url.path == "/api/auth/login":
+            return httpx.Response(403, json={"message": "invalid credentials"})
+        return httpx.Response(401, json={"message": "session expired"})
+
+    with (
+        make_client(handler, username="editor", password="secret") as client,
+        pytest.raises(LeafWikiError, match="invalid credentials"),
+    ):
+        client.get_page(page_id="page-1")
+
+
+def test_reauthentication_preserves_totp_guidance() -> None:
+    """A TOTP account must keep its actionable guidance when recovery runs."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/config":
+            return httpx.Response(200, json={"authDisabled": False})
+        if request.url.path == "/api/auth/login":
+            return httpx.Response(200, json={"requiresTotp": True})
+        return httpx.Response(401, json={"message": "session expired"})
+
+    with (
+        make_client(handler, username="editor", password="secret") as client,
+        pytest.raises(LeafWikiError, match="requires TOTP"),
+    ):
+        client.get_page(page_id="page-1")
+
+
+def test_reauthentication_login_carries_a_token_from_the_new_session() -> None:
+    """Recovery must not reuse the CSRF token bound to the rejected session."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/config":
+            first_config = sum(item.url.path == "/api/config" for item in requests) == 1
+            return httpx.Response(
+                200,
+                json={"authDisabled": False},
+                headers={"X-CSRF-Token": "initial" if first_config else "renewed"},
+            )
+        if request.url.path == "/api/auth/login":
+            return httpx.Response(200, json={"requiresTotp": False})
+        if sum(item.url.path == "/api/pages/page-1" for item in requests) == 1:
+            return httpx.Response(401, json={"message": "session expired"})
+        return httpx.Response(200, json=page_data())
+
+    client = make_client(handler, username="editor", password="secret")
+    with client:
+        client.authenticate()
+        client.get_page(page_id="page-1")
+
+    logins = [request for request in requests if request.url.path == "/api/auth/login"]
+    assert [login.headers["X-CSRF-Token"] for login in logins] == ["initial", "renewed"]
+
+
+def test_protocol_failure_is_not_reported_as_unreachable() -> None:
+    """A redirect loop is a configuration fault, not a temporarily unreachable host."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.TooManyRedirects("too many redirects", request=request)
+
+    with make_client(handler) as client, pytest.raises(LeafWikiError) as error:
+        client.get_page(page_id="page-1")
+
+    assert not isinstance(error.value, LeafWikiConnectionError)
+
+
+def test_dropped_connection_is_retried_for_reads() -> None:
+    """A read that loses a pooled connection should be attempted once more."""
+    attempts: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request)
+        if len(attempts) == 1:
+            raise httpx.RemoteProtocolError("Server disconnected", request=request)
+        return httpx.Response(200, json=page_data())
+
+    with make_client(handler) as client:
+        page = client.get_page(page_id="page-1")
+
+    assert page.id == "page-1"
+    assert len(attempts) == 2
+
+
+def test_ambiguous_transport_failure_is_not_retried_for_mutations() -> None:
+    """A mutation that may have been processed must not be repeated."""
+    attempts: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json=page_data())
+        raise httpx.RemoteProtocolError("Server disconnected", request=request)
+
+    with make_client(handler) as client:
+        page = client.get_page(page_id="page-1")
+        with pytest.raises(LeafWikiConnectionError, match="Connect to LeafWiki"):
+            replace_content(client, page, "New")
+
+    assert sum(request.method == "PUT" for request in attempts) == 1
+
+
+def test_connection_failure_is_retried_for_mutations() -> None:
+    """A mutation that never reached LeafWiki may be attempted once more."""
+    attempts: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json=page_data())
+        if sum(item.method == "PUT" for item in attempts) == 1:
+            raise httpx.ConnectError("connection refused", request=request)
+        return httpx.Response(200, json=page_data(version="v2", content="New"))
+
+    with make_client(handler) as client:
+        page = client.get_page(page_id="page-1")
+        updated = replace_content(client, page, "New")
+
+    assert updated.version == "v2"
+    assert sum(request.method == "PUT" for request in attempts) == 2
+
+
+def test_unreachable_instance_raises_a_connection_error() -> None:
+    """Exhausted retries should raise the connection-specific error type."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    with (
+        make_client(handler) as client,
+        pytest.raises(LeafWikiConnectionError, match="Connect to LeafWiki"),
+    ):
+        client.get_page(page_id="page-1")
+
+
+def test_permission_denial_is_not_treated_as_an_expired_session() -> None:
+    """A 403 is an authorization decision, so logging in again must not be attempted."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(403, json={"message": "forbidden"})
+
+    with (
+        make_client(handler, username="editor", password="secret") as client,
+        pytest.raises(LeafWikiError, match="forbidden"),
+    ):
+        client.get_page(page_id="page-1")
+
+    assert [request.url.path for request in requests] == ["/api/pages/page-1"]
+
+
+def test_timeout_is_not_retried() -> None:
+    """A request that spent its whole timeout budget should not spend it twice."""
+    attempts: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request)
+        raise httpx.ConnectTimeout("timed out", request=request)
+
+    with (
+        make_client(handler) as client,
+        pytest.raises(LeafWikiConnectionError, match="Connect to LeafWiki"),
+    ):
+        client.get_page(page_id="page-1")
+
+    assert len(attempts) == 1
+
+
+def test_rejected_login_is_not_submitted_twice() -> None:
+    """Invalid credentials must not be resubmitted, which would consume lockout attempts."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/config":
+            return httpx.Response(200, json={"authDisabled": False})
+        return httpx.Response(401, json={"message": "invalid credentials"})
+
+    with (
+        make_client(handler, username="editor", password="wrong") as client,
+        pytest.raises(LeafWikiError, match="invalid credentials"),
+    ):
+        client.authenticate()
+
+    assert [request.url.path for request in requests] == ["/api/config", "/api/auth/login"]
+
+
+def test_refreshed_csrf_token_replays_on_an_authentication_disabled_instance() -> None:
+    """A recovered token should be replayed even though no login was required."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/config":
+            return httpx.Response(
+                200, json={"authDisabled": True}, headers={"X-CSRF-Token": "issued"}
+            )
+        if request.method == "GET":
+            return httpx.Response(200, json=page_data())
+        if "X-CSRF-Token" not in request.headers:
+            return httpx.Response(401, json={"message": "missing CSRF token"})
+        return httpx.Response(200, json=page_data(version="v2", content="New"))
+
+    with make_client(handler) as client:
+        page = client.get_page(page_id="page-1")
+        updated = replace_content(client, page, "New")
+
+    updates = [request for request in requests if request.method == "PUT"]
+    assert updated.version == "v2"
+    assert len(updates) == 2
+    assert updates[1].headers["X-CSRF-Token"] == "issued"
+
+
+def test_unchanged_csrf_token_is_not_replayed() -> None:
+    """A refresh that changes nothing should report the rejection instead of retrying."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/config":
+            return httpx.Response(200, json={"authDisabled": True})
+        return httpx.Response(401, json={"message": "unauthorized"})
+
+    with make_client(handler) as client, pytest.raises(LeafWikiError, match="unauthorized"):
+        client.get_page(page_id="page-1")
+
+    assert [request.url.path for request in requests] == ["/api/pages/page-1", "/api/config"]
