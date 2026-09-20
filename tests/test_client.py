@@ -607,3 +607,64 @@ def test_timeout_is_not_retried() -> None:
         client.get_page(page_id="page-1")
 
     assert len(attempts) == 1
+
+
+def test_rejected_login_is_not_submitted_twice() -> None:
+    """Invalid credentials must not be resubmitted, which would consume lockout attempts."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/config":
+            return httpx.Response(200, json={"authDisabled": False})
+        return httpx.Response(401, json={"message": "invalid credentials"})
+
+    with (
+        make_client(handler, username="editor", password="wrong") as client,
+        pytest.raises(LeafWikiError, match="invalid credentials"),
+    ):
+        client.authenticate()
+
+    assert [request.url.path for request in requests] == ["/api/config", "/api/auth/login"]
+
+
+def test_refreshed_csrf_token_replays_on_an_authentication_disabled_instance() -> None:
+    """A recovered token should be replayed even though no login was required."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/config":
+            return httpx.Response(
+                200, json={"authDisabled": True}, headers={"X-CSRF-Token": "issued"}
+            )
+        if request.method == "GET":
+            return httpx.Response(200, json=page_data())
+        if "X-CSRF-Token" not in request.headers:
+            return httpx.Response(401, json={"message": "missing CSRF token"})
+        return httpx.Response(200, json=page_data(version="v2", content="New"))
+
+    with make_client(handler) as client:
+        page = client.get_page(page_id="page-1")
+        updated = replace_content(client, page, "New")
+
+    updates = [request for request in requests if request.method == "PUT"]
+    assert updated.version == "v2"
+    assert len(updates) == 2
+    assert updates[1].headers["X-CSRF-Token"] == "issued"
+
+
+def test_unchanged_csrf_token_is_not_replayed() -> None:
+    """A refresh that changes nothing should report the rejection instead of retrying."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/config":
+            return httpx.Response(200, json={"authDisabled": True})
+        return httpx.Response(401, json={"message": "unauthorized"})
+
+    with make_client(handler) as client, pytest.raises(LeafWikiError, match="unauthorized"):
+        client.get_page(page_id="page-1")
+
+    assert [request.url.path for request in requests] == ["/api/pages/page-1", "/api/config"]

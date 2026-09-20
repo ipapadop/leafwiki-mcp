@@ -176,6 +176,22 @@ class LeafWikiClient:
     def authenticate(self) -> None:
         """Connect to LeafWiki and authenticate when required.
 
+        The whole exchange is marked as in progress so that a rejected login is
+        reported rather than resubmitted by session recovery.
+
+        Raises:
+            LeafWikiError: If credentials are missing, authentication fails, or the
+                account requires TOTP.
+        """
+        self._authenticating = True
+        try:
+            self._start_session()
+        finally:
+            self._authenticating = False
+
+    def _start_session(self) -> None:
+        """Read the instance configuration and log in when authentication is enabled.
+
         Raises:
             LeafWikiError: If credentials are missing, authentication fails, or the
                 account requires TOTP.
@@ -978,27 +994,27 @@ class LeafWikiClient:
         """Repeat the startup authentication exchange for a rejected session.
 
         The full exchange runs so that the login request carries a CSRF token from the
-        new session rather than the token bound to the rejected one.
+        new session rather than the token bound to the rejected one. An instance with
+        authentication disabled performs no login, so the request is worth replaying
+        only when the exchange produced a different CSRF token.
 
         Returns:
-            Whether a fresh session was established and the request may be replayed.
+            Whether the session changed and the request may be replayed.
 
         Raises:
             LeafWikiError: If re-authentication fails, so that credential, TOTP, and
                 reachability guidance reaches the caller instead of a bare rejection.
         """
-        if self._authenticating or self._auth_disabled:
+        if self._authenticating:
             return False
-        self._authenticating = True
+        previous_token = self._csrf_token
         try:
             self.authenticate()
         except LeafWikiError as error:
             raise LeafWikiError(
                 f"LeafWiki rejected the session and re-authentication failed: {error}"
             ) from error
-        finally:
-            self._authenticating = False
-        return not self._auth_disabled
+        return not self._auth_disabled or self._csrf_token != previous_token
 
     @staticmethod
     def _is_retriable(error: httpx.TransportError, method: str) -> bool:
